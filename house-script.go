@@ -37,8 +37,11 @@ type RetryGetPage struct {
 }
 
 func main() {
+	log.Println("Starting save houses")
 	houseCh := getHouses(10)
 	downloadHouse(houseCh)
+	log.Println("Process complete!")
+	os.Exit(0)
 }
 
 // getHouses gets all houses by page
@@ -103,7 +106,6 @@ func tryGetPage(page int, retryCh chan RetryGetPage, houseCh chan House, wg *syn
 
 // getPage gets a single page of Houses from the GetPhotoEndpoint
 func getPage(page int) (*Houses, error) {
-	time.Sleep(2 * time.Second)
 	res, err := http.Get(GetPhotoEndpoint + strconv.Itoa(page))
 	if err != nil {
 		return nil, err
@@ -140,6 +142,7 @@ func downloadHouse(houseCh chan House) {
 			}
 
 			fileName := fmt.Sprintf("id-[%s]-[%s]%s", strconv.Itoa(house.ID), house.Address, filepath.Ext(house.PhotoURL))
+			// Create file
 			out, err := os.Create(fmt.Sprintf("./photos/%s", fileName))
 			if err != nil {
 				log.Printf("downloadHouse: create error for image with filename: %s", fileName)
