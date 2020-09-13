@@ -85,20 +85,14 @@ func getHouses(pages int) chan House {
 func tryGetPage(page int, retryCh chan RetryGetPage, houseCh chan House, wg *sync.WaitGroup) {
 	defer wg.Done()
 	houses, err := getPage(page)
-	if err != nil {
+	if err != nil || houses.Ok == false {
 		retryCh <- RetryGetPage{
 			Error: err,
 			Page: page,
 		}
 		return
 	}
-	if houses.Ok == false {
-		retryCh <- RetryGetPage{
-			Error: err,
-			Page: page,
-		}
-		return
-	}
+
 	for _, h := range houses.Houses {
 		houseCh <- h
 	}
