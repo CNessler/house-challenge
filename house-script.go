@@ -16,18 +16,19 @@ import (
 const (
 	DirectoryPermission = 0755
 	GetPhotoEndpoint = "http://app-homevision-staging.herokuapp.com/api_project/houses?page="
+	TotalPages = 10
 )
 
 type Houses struct {
-	Houses []House `json:"houses"`
-	Ok     bool     `json:"ok"`
+	Houses []House
+	Ok     bool
 }
 type House struct {
-	ID        int    `json:"id"`
-	Address   string `json:"address"`
-	Homeowner string `json:"homeowner"`
-	Price     int    `json:"price"`
-	PhotoURL  string `json:"photoURL"`
+	ID        int
+	Address   string
+	Homeowner string
+	Price     int
+	PhotoURL  string
 }
 
 type RetryGetPage struct {
@@ -38,7 +39,7 @@ type RetryGetPage struct {
 
 func main() {
 	log.Println("Starting save houses")
-	houseCh := getHouses(10)
+	houseCh := getHouses(TotalPages)
 	downloadHouse(houseCh)
 	log.Println("Process complete!")
 	os.Exit(0)
@@ -131,7 +132,7 @@ func downloadHouse(houseCh chan House) {
 				resp, err := http.Get(house.PhotoURL)
 				if err != nil {
 					if i == 5 {
-						log.Printf("error downloading photo for house %s with download url %s", house.ID, house.PhotoURL)
+						log.Printf("downloadHouse: error downloading photo for house %s with download url %s", house.ID, house.PhotoURL)
 					}
 					i++
 					time.Sleep(2 * time.Second)
@@ -141,7 +142,7 @@ func downloadHouse(houseCh chan House) {
 				response = *resp
 			}
 
-			fileName := fmt.Sprintf("id-[%s]-[%s]%s", strconv.Itoa(house.ID), house.Address, filepath.Ext(house.PhotoURL))
+			fileName := fmt.Sprintf("id-%s-%s%s", strconv.Itoa(house.ID), house.Address, filepath.Ext(house.PhotoURL))
 			// Create file
 			out, err := os.Create(fmt.Sprintf("./photos/%s", fileName))
 			if err != nil {
