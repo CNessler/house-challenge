@@ -3,22 +3,19 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
-	"time"
 )
-
 const (
 	DirectoryPermission = 0755
-	GetPhotoEndpoint = "http://app-homevision-staging.herokuapp.com/api_project/houses?page="
-	TotalPages = 10
+	GetPhotoEndpoint    = "http://app-homevision-staging.herokuapp.com/api_project/houses?page="
+	TotalPages          = 10
 )
-
 type Houses struct {
 	Houses []House
 	Ok     bool
@@ -31,127 +28,90 @@ type House struct {
 	PhotoURL  string
 }
 
-type RetryGetPage struct {
-	Error error
-	Page int
-	RetryCount int
-}
-
 func main() {
-	log.Println("Starting save houses")
-	houseCh := getHouses(TotalPages)
-	downloadHouse(houseCh)
-	log.Println("Process complete!")
-	os.Exit(0)
+	log.Println("Starting process")
+	err := getHouses(TotalPages)
+	if err != nil {
+		log.Printf("Error: %w")
+	}
+	log.Println("Process Complete!")
 }
 
 // getHouses gets all houses by page
-func getHouses(pages int) chan House {
-	retryCh := make(chan RetryGetPage)
-	houseCh := make(chan House)
+func getHouses(pages int) error {
 	var wg sync.WaitGroup
 	for i := 1; i <= pages; i++ {
-		wg.Add(1)
-		i := i
-		go func() {
-			tryGetPage(i, retryCh, houseCh, &wg)
-		}()
+		houseList, err := tryGetPage(i)
+		if err != nil {
+			return fmt.Errorf("getHouses: %w", err)
+		}
+		for _, house := range houseList.Houses {
+			wg.Add(1)
+			go func(house House) {
+				defer wg.Done()
+				readCloser, err := downloadHouse(house)
+				if err != nil {
+					log.Printf("error downloading house with id %s", strconv.Itoa(house.ID))
+				}
+				err = writeToDisk(house, readCloser)
+				if err != nil {
+					log.Printf("error writing house with id %s", strconv.Itoa(house.ID))
+				}
+			}(house)
+		}
 	}
 
-	go func() {
-		for retry := range retryCh {
-			wg.Add(1)
-			if retry.RetryCount == 5 {
-				log.Printf("getHouses: maximum retry limit for page %s", strconv.Itoa(retry.Page))
-			}
-			time.Sleep(2 * time.Second)
-			tryGetPage(retry.Page, retryCh, houseCh, &wg)
-			retry.RetryCount++
-		}
-	}()
-
-	go func() {
-		wg.Wait()
-		close(retryCh)
-		close(houseCh)
-	}()
-
-	return houseCh
+	wg.Wait()
+	return nil
 }
 
-// tryGetPage attempts to get a single page of houses. If successful it puts each house
-// on the house channel. If the response is an error or house.Ok is false it puts RetryGetPage
-// on the retry channel to try the page again
-func tryGetPage(page int, retryCh chan RetryGetPage, houseCh chan House, wg *sync.WaitGroup) {
-	defer wg.Done()
+// tryGetPage gets a single page of houses until successful
+func tryGetPage(page int) (*Houses, error) {
 	houses, err := getPage(page)
-	if err != nil || houses.Ok == false {
-		retryCh <- RetryGetPage{
-			Error: err,
-			Page: page,
-		}
-		return
+	if err != nil {
+		return nil, fmt.Errorf("tryGetPage: %w", err)
 	}
-
-	for _, h := range houses.Houses {
-		houseCh <- h
+	if houses.Ok {
+		return houses, nil
 	}
-	return
+	return tryGetPage(page)
 }
 
 // getPage gets a single page of Houses from the GetPhotoEndpoint
 func getPage(page int) (*Houses, error) {
 	res, err := http.Get(GetPhotoEndpoint + strconv.Itoa(page))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getPage: http.Get error %v", err)
 	}
-
 	var houses Houses
 	err = json.NewDecoder(res.Body).Decode(&houses)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getPage: json decode errog %v", err)
 	}
 	return &houses, nil
 }
 
-// downloadHouse downloads a house to a local file.
-// It writes as it downloads without storing the entire image into memory
-func downloadHouse(houseCh chan House) {
-	_ = os.Mkdir("photos", DirectoryPermission)
-	for house := range houseCh {
-		house := house
-		go func() {
-			var response http.Response
-			for i := 0; i <= 5; i++ {
-				resp, err := http.Get(house.PhotoURL)
-				if err != nil {
-					if i == 5 {
-						log.Printf("downloadHouse: error downloading photo for house %s with download url %s", house.ID, house.PhotoURL)
-					}
-					i++
-					time.Sleep(2 * time.Second)
-					continue
-				}
-				defer resp.Body.Close()
-				response = *resp
-			}
-
-			fileName := fmt.Sprintf("id-%s-%s%s", strconv.Itoa(house.ID), house.Address, filepath.Ext(house.PhotoURL))
-			// Create file
-			out, err := os.Create(fmt.Sprintf("./photos/%s", fileName))
-			if err != nil {
-				log.Printf("downloadHouse: create error for image with filename: %s", fileName)
-				return
-			}
-			defer out.Close()
-
-			// Write the body to file
-			_, err = io.Copy(out, response.Body)
-			if err != nil {
-				log.Println("downloadHouse: error copying image bytes to file")
-				return
-			}
-		}()
+// downloadHouse downloads a house and returns its bytes
+func downloadHouse(house House) ([]byte, error) {
+	resp, err := http.Get(house.PhotoURL)
+	defer resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("downloadHouse: error downloading photo for house %s with download url %s", strconv.Itoa(house.ID), house.PhotoURL)
 	}
-	return
+	bytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("downloadHouse: error reading bytes for house %s", strconv.Itoa(house.ID))
+	}
+	return bytes, nil
+}
+
+// writeToDisk writes a house image to the local photos directory
+func writeToDisk(house House, bytes []byte) error {
+	_ = os.Mkdir("photos", DirectoryPermission)
+	fileName := fmt.Sprintf("id-%s-%s%s", strconv.Itoa(house.ID), house.Address, filepath.Ext(house.PhotoURL))
+	err := ioutil.WriteFile(fmt.Sprintf("./photos/%s", fileName), bytes, 777)
+	if err != nil {
+		return fmt.Errorf("writeToDisk: house %v", house)
+	}
+	return nil
 }
