@@ -8,4 +8,3 @@ For this code challenge I wrote a single script that will save house images to a
 ### Notes (with more time)
 - I would like to have added tests specifically around the retry logic 
 - It would have been nice to have some comparisons for download time with and without having concurrency
-  - What would be the difference if the pagination calls were also concurrent?
