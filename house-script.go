@@ -32,7 +32,7 @@ type House struct {
 }
 
 func main() {
-	log.Println("Starting process")
+	log.Println("Starting process...")
 
 	houseCh, err := getHouses(TotalPages)
 	if err != nil {
@@ -54,10 +54,12 @@ func processHouse(houseCh chan House) {
 			readCloser, err := downloadHouse(house)
 			if err != nil {
 				log.Printf("error downloading house with id %s", strconv.Itoa(house.ID))
+				return
 			}
 			err = writeToDisk(house, readCloser)
 			if err != nil {
 				log.Printf("error writing house with id %s", strconv.Itoa(house.ID))
+				return
 			}
 		}(house)
 	}
