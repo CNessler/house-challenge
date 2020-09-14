@@ -11,15 +11,18 @@ import (
 	"strconv"
 	"sync"
 )
+
 const (
 	DirectoryPermission = 0755
 	GetPhotoEndpoint    = "http://app-homevision-staging.herokuapp.com/api_project/houses?page="
 	TotalPages          = 10
 )
+
 type Houses struct {
 	Houses []House
 	Ok     bool
 }
+
 type House struct {
 	ID        int
 	Address   string
