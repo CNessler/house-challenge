@@ -33,51 +33,73 @@ type House struct {
 
 func main() {
 	log.Println("Starting process")
-	err := getHouses(TotalPages)
+
+	houseCh, err := getHouses(TotalPages)
 	if err != nil {
 		log.Printf("Error: %w")
 	}
+
+	processHouse(houseCh)
+
 	log.Println("Process Complete!")
 }
 
-// getHouses gets all houses by page
-func getHouses(pages int) error {
+// processHouse takes a channel of House and processes each to be saved
+func processHouse(houseCh chan House) {
 	var wg sync.WaitGroup
-	for i := 1; i <= pages; i++ {
-		houseList, err := tryGetPage(i)
-		if err != nil {
-			return fmt.Errorf("getHouses: %w", err)
-		}
-		for _, house := range houseList.Houses {
-			wg.Add(1)
-			go func(house House) {
-				defer wg.Done()
-				readCloser, err := downloadHouse(house)
-				if err != nil {
-					log.Printf("error downloading house with id %s", strconv.Itoa(house.ID))
-				}
-				err = writeToDisk(house, readCloser)
-				if err != nil {
-					log.Printf("error writing house with id %s", strconv.Itoa(house.ID))
-				}
-			}(house)
-		}
+	for house := range houseCh {
+		wg.Add(1)
+		go func(house House) {
+			defer wg.Done()
+			readCloser, err := downloadHouse(house)
+			if err != nil {
+				log.Printf("error downloading house with id %s", strconv.Itoa(house.ID))
+			}
+			err = writeToDisk(house, readCloser)
+			if err != nil {
+				log.Printf("error writing house with id %s", strconv.Itoa(house.ID))
+			}
+		}(house)
 	}
 
 	wg.Wait()
-	return nil
+	return
+}
+
+// getHouses gets all houses by page
+func getHouses(pages int) (chan House, error) {
+	houseCh := make(chan House)
+	var wg sync.WaitGroup
+	for i := 1; i <= pages; i++ {
+		wg.Add(1)
+		i := i
+		go func() {
+			tryGetPage(i, houseCh, &wg)
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(houseCh)
+	}()
+
+	return houseCh, nil
 }
 
 // tryGetPage gets a single page of houses until successful
-func tryGetPage(page int) (*Houses, error) {
+func tryGetPage(page int, houseCh chan House, wg *sync.WaitGroup) {
 	houses, err := getPage(page)
 	if err != nil {
-		return nil, fmt.Errorf("tryGetPage: %w", err)
+		log.Printf("tryGetPage: %v", err)
 	}
 	if houses.Ok {
-		return houses, nil
+		for _, h := range houses.Houses {
+			houseCh <- h
+		}
+		wg.Done()
+		return
 	}
-	return tryGetPage(page)
+	tryGetPage(page, houseCh, wg)
 }
 
 // getPage gets a single page of Houses from the GetPhotoEndpoint
